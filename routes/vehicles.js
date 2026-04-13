@@ -8,7 +8,7 @@ const router = express.Router();
 // List all available vehicles 
 router.get('/', async (req, res) => {
   try {
-    let sql = `SELECT v.*, p.Name AS Owner_Name, p.Contact_Number AS Owner_Contact
+    let sql = `SELECT v.*, p.Name AS Owner_Name, p.Contact_Number AS Owner_Contact, p.Address AS Owner_Address
                FROM VEHICLE v JOIN PERSON p ON v.Owner_Account_ID = p.Account_ID
                WHERE v.Vehicle_Status = 'Available'`;
     const params = [];
@@ -26,7 +26,10 @@ router.get('/', async (req, res) => {
 router.get('/my', auth, async (req, res) => {
   try {
     const [vehicles] = await pool.query(
-      `SELECT * FROM VEHICLE WHERE Owner_Account_ID = ?`, [req.user.account_id]
+      `SELECT v.*, p.Address AS Owner_Address 
+      FROM VEHICLE V
+      JOIN PERSON p ON v.Owner_Account_ID = p.Account_ID
+      WHERE v.Owner_Account_ID = ?`, [req.user.account_id]
     );
     res.json({ success: true, data: vehicles });
   } catch (err) {
@@ -63,19 +66,19 @@ router.post('/', auth, async (req, res) => {
     }
 
     const { vehicle_type, vehicle_model, vehicle_color, seat_capacity,
-            daily_rate, plate_number, registration_date, fuel_type } = req.body;
+            daily_rate, plate_number, registration_date, fuel_type, with_driver } = req.body;
 
-    if (!vehicle_type || !vehicle_model || !plate_number || !registration_date || !daily_rate) {
+    if (!vehicle_type || !vehicle_model || !plate_number || !registration_date) {
       return res.status(400).json({ success: false, message: 'Please fill in all required vehicle fields.' });
     }
 
     const vehicleID = await genID('VEHICLE');
     await pool.query(
       `INSERT INTO VEHICLE (Vehicle_ID, Vehicle_Type, Vehicle_Model, Vehicle_Color, Seat_Capacity,
-        Daily_Rate, Plate_Number, Registration_Date, Vehicle_Status, Fuel_Type, Owner_Account_ID)
-       VALUES (?,?,?,?,?,?,?,?,'Available',?,?)`,
+        Daily_Rate, Plate_Number, Registration_Date, Vehicle_Status, Fuel_Type, With_Driver, Owner_Account_ID)
+       VALUES (?,?,?,?,?,?,?,?,'Available',?,?,?)`,
       [vehicleID, vehicle_type, vehicle_model, vehicle_color, seat_capacity,
-       daily_rate, plate_number, registration_date, fuel_type || null, req.user.account_id]
+       daily_rate, plate_number, registration_date, fuel_type || null, with_driver || 0, req.user.account_id]
     );
 
     res.status(201).json({ success: true, message: 'Vehicle listed!', data: { vehicle_id: vehicleID } });
@@ -119,5 +122,42 @@ router.delete('/:id', auth, async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
+
+// READ
+router.put('/:id', auth, async (req, res) => {
+  try {
+    const [[v]] = await pool.query(
+      `SELECT Owner_Account_ID FROM VEHICLE WHERE Vehicle_ID = ?`, 
+      [req.params.id]
+    )
+    if (!v) return res.status(404).json({ 
+      success: false, message: 'Vehicle not found.' 
+    })
+    if (v.Owner_Account_ID !== req.user.account_id) 
+      return res.status(403).json({ 
+        success: false, message: 'Not your vehicle.' 
+      })
+
+    const { vehicle_type, vehicle_model, vehicle_color, 
+            seat_capacity, daily_rate, plate_number, 
+            registration_date, fuel_type } = req.body
+
+    await pool.query(
+      `UPDATE VEHICLE SET 
+        Vehicle_Type = ?, Vehicle_Model = ?, Vehicle_Color = ?,
+        Seat_Capacity = ?, Daily_Rate = ?, Plate_Number = ?,
+        Registration_Date = ?, Fuel_Type = ?
+       WHERE Vehicle_ID = ?`,
+      [vehicle_type, vehicle_model, vehicle_color,
+       seat_capacity, daily_rate, plate_number,
+       registration_date, fuel_type || null, req.params.id]
+    )
+
+    res.json({ success: true, message: 'Vehicle updated!' })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ success: false, message: 'Server error.' })
+  }
+})
 
 module.exports = router;
