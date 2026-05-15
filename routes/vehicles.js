@@ -160,4 +160,82 @@ router.put('/:id', auth, async (req, res) => {
   }
 })
 
+// GET /api/vehicles/:id/availability
+// Returns all booked date ranges for a vehicle (for calendar display)
+router.get('/:id/availability', async (req, res) => {
+  try {
+    const [bookings] = await pool.query(
+      `SELECT
+         rt.Transaction_ID,
+         rt.Start_Date_and_Time,
+         rt.End_Date_and_Time,
+         rt.Rental_Status
+       FROM RENTAL_TRANSACTION rt
+       WHERE rt.Vehicle_ID = ?
+         AND rt.Rental_Status IN ('Confirmed', 'Ongoing')
+       ORDER BY rt.Start_Date_and_Time`,
+      [req.params.id]
+    );
+
+    // Also check confirmed inquiries (not yet booked)
+    const [inquiryDates] = await pool.query(
+      `SELECT
+         i.Inquiry_ID,
+         i.Start_Date AS Start_Date_and_Time,
+         i.End_Date   AS End_Date_and_Time,
+         i.Inquiry_Status AS Rental_Status
+       FROM INQUIRY i
+       WHERE i.Vehicle_ID = ?
+         AND i.Inquiry_Status IN ('Confirmed', 'Booked')`,
+      [req.params.id]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        vehicle_id: req.params.id,
+        booked_ranges: bookings,
+        inquiry_ranges: inquiryDates
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// PATCH /api/vehicles/:id/link-business
+// Link a vehicle to a business (owner must own both)
+router.patch('/:id/link-business', auth, async (req, res) => {
+  const { business_id } = req.body;
+  if (!business_id) return res.status(400).json({ success: false, message: 'business_id is required.' });
+
+  try {
+    const [[v]] = await pool.query(
+      `SELECT Owner_Account_ID FROM VEHICLE WHERE Vehicle_ID = ?`,
+      [req.params.id]
+    );
+    if (!v) return res.status(404).json({ success: false, message: 'Vehicle not found.' });
+    if (v.Owner_Account_ID !== req.user.account_id)
+      return res.status(403).json({ success: false, message: 'Not your vehicle.' });
+
+    const [[biz]] = await pool.query(
+      `SELECT Owner_Account_ID FROM BUSINESS WHERE Business_ID = ?`,
+      [business_id]
+    );
+    if (!biz) return res.status(404).json({ success: false, message: 'Business not found.' });
+    if (biz.Owner_Account_ID !== req.user.account_id)
+      return res.status(403).json({ success: false, message: 'Not your business.' });
+
+    await pool.query(
+      `UPDATE VEHICLE SET Business_ID = ? WHERE Vehicle_ID = ?`,
+      [business_id, req.params.id]
+    );
+    res.json({ success: true, message: 'Vehicle linked to business.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 module.exports = router;
