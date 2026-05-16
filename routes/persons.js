@@ -4,6 +4,48 @@ const auth   = require('../middleware/auth');
 
 const router = express.Router();
 
+// List all persons who own at least one vehicle (used by BusinessListPage)
+router.get('/owners', async (req, res) => {
+  try {
+    const [owners] = await pool.query(
+      `SELECT
+         p.Account_ID, p.Name, p.Address, p.Contact_Number, p.Email,
+         b.Business_ID, b.Business_Name, b.Latitude, b.Longitude
+       FROM PERSON p
+       INNER JOIN VEHICLE v ON v.Owner_Account_ID = p.Account_ID
+       LEFT JOIN BUSINESS b ON b.Owner_Account_ID = p.Account_ID AND b.Is_Active = 1
+       GROUP BY p.Account_ID`
+    );
+
+    // Attach vehicles to each owner
+    const ownerIds = owners.map(o => o.Account_ID);
+    if (ownerIds.length === 0) return res.json({ success: true, data: [] });
+
+    const placeholders = ownerIds.map(() => '?').join(',');
+    const [vehicles] = await pool.query(
+      `SELECT v.*,
+              COALESCE(
+                (SELECT Photo_URL FROM VEHICLE_PHOTO
+                 WHERE Vehicle_ID = v.Vehicle_ID AND Is_Primary = 1 LIMIT 1),
+                NULL
+              ) AS Primary_Photo
+       FROM VEHICLE v
+       WHERE v.Owner_Account_ID IN (${placeholders})`,
+      ownerIds
+    );
+
+    const data = owners.map(owner => ({
+      ...owner,
+      vehicles: vehicles.filter(v => v.Owner_Account_ID === owner.Account_ID)
+    }));
+
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 // Get your own profile
 router.get('/me', auth, async (req, res) => {
   try {

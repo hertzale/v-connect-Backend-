@@ -5,22 +5,42 @@ const genID  = require('../config/idGen');
 
 const router = express.Router();
 
-// See all transactions history
+// ADD DATE-RANGE FILTER
+// See all transactions history 
 router.get('/', auth, async (req, res) => {
   try {
+    const { role, from, to, status } = req.query;
+
+    let conditions = [`(rt.Customer_Account_ID = ? OR rt.Owner_Account_ID = ?)`];
+    let params = [req.user.account_id, req.user.account_id];
+
+    if (role === 'customer') {
+      conditions = [`rt.Customer_Account_ID = ?`];
+      params = [req.user.account_id];
+    } else if (role === 'owner') {
+      conditions = [`rt.Owner_Account_ID = ?`];
+      params = [req.user.account_id];
+    }
+
+    if (from) { conditions.push(`rt.Transaction_Date >= ?`); params.push(from); }
+    if (to)   { conditions.push(`rt.Transaction_Date <= ?`); params.push(to); }
+    if (status) { conditions.push(`rt.Rental_Status = ?`); params.push(status); }
+
     const [rows] = await pool.query(
       `SELECT rt.*,
               v.Vehicle_Type, v.Vehicle_Model, v.Plate_Number, v.Daily_Rate,
               c.Name AS Customer_Name,
               o.Name AS Owner_Name,
-              DATEDIFF(rt.End_Date_and_Time, rt.Start_Date_and_Time) AS Rental_Duration
+              DATEDIFF(rt.End_Date_and_Time, rt.Start_Date_and_Time) AS Rental_Duration,
+              pay.Total_Amount, pay.Payment_Status, pay.Payment_Method
        FROM RENTAL_TRANSACTION rt
        JOIN VEHICLE v ON rt.Vehicle_ID = v.Vehicle_ID
        JOIN PERSON c  ON rt.Customer_Account_ID = c.Account_ID
        JOIN PERSON o  ON rt.Owner_Account_ID    = o.Account_ID
-       WHERE rt.Customer_Account_ID = ? OR rt.Owner_Account_ID = ?
+       LEFT JOIN PAYMENT pay ON pay.Transaction_ID = rt.Transaction_ID
+       WHERE ${conditions.join(' AND ')}
        ORDER BY rt.Transaction_Date DESC`,
-      [req.user.account_id, req.user.account_id]
+      params
     );
     res.json({ success: true, data: rows });
   } catch (err) {

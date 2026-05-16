@@ -64,7 +64,7 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// Owner payment confirmation as Paid or Refunded
+// Owner payment confirmation (Paid or Refunded)
 router.patch('/:id/status', auth, async (req, res) => {
   const { status } = req.body;
   if (!['Paid', 'Refunded'].includes(status)) return res.status(400).json({ success: false, message: 'Status must be Paid or Refunded.' });
@@ -81,6 +81,117 @@ router.patch('/:id/status', auth, async (req, res) => {
 
     await pool.query(`UPDATE PAYMENT SET Payment_Status = ? WHERE Payment_ID = ?`, [status, req.params.id]);
     res.json({ success: true, message: `Payment marked as ${status}.` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// Owner records a payment receipt (partial or full)
+router.post('/:id/receipt', auth, async (req, res) => {
+  const { amount_paid, payment_type, remarks } = req.body;
+
+  if (!amount_paid) return res.status(400).json({ success: false, message: 'amount_paid is required.' });
+  if (payment_type && !['Full', 'Partial'].includes(payment_type))
+    return res.status(400).json({ success: false, message: 'payment_type must be Full or Partial.' });
+
+  try {
+    const [[payment]] = await pool.query(
+      `SELECT p.*, rt.Owner_Account_ID FROM PAYMENT p
+       JOIN RENTAL_TRANSACTION rt ON p.Transaction_ID = rt.Transaction_ID
+       WHERE p.Payment_ID = ?`,
+      [req.params.id]
+    );
+    if (!payment) return res.status(404).json({ success: false, message: 'Payment not found.' });
+    if (payment.Owner_Account_ID !== req.user.account_id)
+      return res.status(403).json({ success: false, message: 'Only the owner can record receipts.' });
+
+    // Check total paid 
+    const [[{ total_paid }]] = await pool.query(
+      `SELECT COALESCE(SUM(Amount_Paid), 0) AS total_paid
+       FROM RECEIPT WHERE Payment_ID = ?`,
+      [req.params.id]
+    );
+
+    const remaining = parseFloat(payment.Total_Amount) - parseFloat(total_paid);
+    if (parseFloat(amount_paid) > remaining) {
+      return res.status(400).json({
+        success: false,
+        message: `Amount exceeds remaining balance of ₱${remaining.toFixed(2)}.`
+      });
+    }
+
+    const receiptID = await genID('RECEIPT');
+    const today = new Date().toISOString().slice(0, 10);
+
+    await pool.query(
+      `INSERT INTO RECEIPT (Receipt_ID, Payment_ID, Amount_Paid, Payment_Type, Remarks, Receipt_Date, Recorded_By)
+       VALUES (?,?,?,?,?,?,?)`,
+      [receiptID, req.params.id, amount_paid, payment_type || 'Full', remarks || null, today, req.user.account_id]
+    );
+
+    const newTotal = parseFloat(total_paid) + parseFloat(amount_paid);
+    if (newTotal >= parseFloat(payment.Total_Amount)) {
+      await pool.query(
+        `UPDATE PAYMENT SET Payment_Status = 'Paid' WHERE Payment_ID = ?`,
+        [req.params.id]
+      );
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Receipt recorded.',
+      data: {
+        receipt_id: receiptID,
+        amount_paid,
+        total_paid: newTotal.toFixed(2),
+        remaining: (parseFloat(payment.Total_Amount) - newTotal).toFixed(2)
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// GET /api/payments/:id/receipts — list all receipts for a payment
+router.get('/:id/receipts', auth, async (req, res) => {
+  try {
+    const [[payment]] = await pool.query(
+      `SELECT p.*, rt.Owner_Account_ID, rt.Customer_Account_ID
+       FROM PAYMENT p
+       JOIN RENTAL_TRANSACTION rt ON p.Transaction_ID = rt.Transaction_ID
+       WHERE p.Payment_ID = ?`,
+      [req.params.id]
+    );
+    if (!payment) return res.status(404).json({ success: false, message: 'Payment not found.' });
+    if (payment.Owner_Account_ID !== req.user.account_id &&
+        payment.Customer_Account_ID !== req.user.account_id)
+      return res.status(403).json({ success: false, message: 'Access denied.' });
+
+    const [receipts] = await pool.query(
+      `SELECT r.*, p.Name AS Recorded_By_Name
+       FROM RECEIPT r
+       JOIN PERSON p ON r.Recorded_By = p.Account_ID
+       WHERE r.Payment_ID = ?
+       ORDER BY r.Receipt_Date ASC`,
+      [req.params.id]
+    );
+
+    const [[{ total_paid }]] = await pool.query(
+      `SELECT COALESCE(SUM(Amount_Paid), 0) AS total_paid FROM RECEIPT WHERE Payment_ID = ?`,
+      [req.params.id]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        payment,
+        receipts,
+        total_paid: parseFloat(total_paid).toFixed(2),
+        remaining: (parseFloat(payment.Total_Amount) - parseFloat(total_paid)).toFixed(2)
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error.' });
