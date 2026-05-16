@@ -88,7 +88,26 @@ CREATE TABLE IF NOT EXISTS ID_COUNTER (
     last_num INT DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS INQUIRY (
+    Inquiry_ID          VARCHAR(12)    NOT NULL,
+    Vehicle_ID          VARCHAR(12)    NOT NULL,
+    Customer_Account_ID VARCHAR(12)    NOT NULL,
+    Owner_Account_ID    VARCHAR(12)    NOT NULL,
+    Offered_Price       DECIMAL(10,2)  NOT NULL,
+    Agreed_Price        DECIMAL(10,2)  DEFAULT NULL,
+    Start_Date          DATE           NOT NULL,
+    End_Date            DATE           NOT NULL,
+    Message             VARCHAR(150)   DEFAULT NULL,
+    Inquiry_Status      VARCHAR(20)    DEFAULT 'Pending',
+    Created_At          DATETIME       DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (Inquiry_ID),
+    FOREIGN KEY (Vehicle_ID)          REFERENCES VEHICLE(Vehicle_ID),
+    FOREIGN KEY (Customer_Account_ID) REFERENCES PERSON(Account_ID),
+    FOREIGN KEY (Owner_Account_ID)    REFERENCES PERSON(Account_ID),
+    CHECK (Inquiry_Status IN ('Pending', 'Accepted', 'Rejected', 'Completed'))
+);
+
 INSERT INTO ID_COUNTER (entity, last_num) VALUES
     ('PERSON', 0), ('VEHICLE', 0), ('TRANSACTION', 0),
-    ('PAYMENT', 0), ('FEEDBACK', 0)
+    ('PAYMENT', 0), ('FEEDBACK', 0), ('INQUIRY', 0)
 ON DUPLICATE KEY UPDATE entity = entity;
