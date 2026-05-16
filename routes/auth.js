@@ -88,7 +88,7 @@ router.post("/login", async (req, res) => {
 
   try {
     const [[user]] = await pool.query(
-      `SELECT Account_ID, Name, Email, Password, Drivers_License, Owner_Type FROM PERSON WHERE Email = ?`,
+      `SELECT Account_ID, Name, Address, Email, Contact_Number, Password, Drivers_License, Owner_Type FROM PERSON WHERE Email = ?`,
       [email],
     );
 
@@ -107,17 +107,21 @@ router.post("/login", async (req, res) => {
     );
 
     res.json({
-      success: true,
-      message: "Logged in successfully.",
-      data: {
-        account_id: user.Account_ID,
-        name: user.Name,
-        email: user.Email,
-        has_license: !!user.Drivers_License,
-        role: user.Drivers_License ? 'Business_Owner' : 'Customer',
-        token,
-      },
-    });
+    success: true,
+    message: 'Logged in successfully.',
+    data: {
+      account_id: user.Account_ID,
+      name: user.Name,
+      Person_Name: user.Name,
+      email: user.Email,
+      contact_number: user.Contact_Number,
+      address: user.Address,
+      drivers_license: user.Drivers_License || null,
+      has_license: !!user.Drivers_License,
+      role: user.Drivers_License ? 'Business_Owner' : 'Customer',
+      token,
+    },
+  });
   } catch (err) {
     console.error(err);
     res

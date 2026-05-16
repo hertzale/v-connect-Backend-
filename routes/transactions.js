@@ -32,14 +32,16 @@ router.get('/', auth, async (req, res) => {
               c.Name AS Customer_Name,
               o.Name AS Owner_Name,
               DATEDIFF(rt.End_Date_and_Time, rt.Start_Date_and_Time) AS Rental_Duration,
+              DATE(rt.Start_Date_and_Time) AS Start_Date,
+              DATE(rt.End_Date_and_Time)   AS End_Date,
               pay.Total_Amount, pay.Payment_Status, pay.Payment_Method
-       FROM RENTAL_TRANSACTION rt
-       JOIN VEHICLE v ON rt.Vehicle_ID = v.Vehicle_ID
-       JOIN PERSON c  ON rt.Customer_Account_ID = c.Account_ID
-       JOIN PERSON o  ON rt.Owner_Account_ID    = o.Account_ID
-       LEFT JOIN PAYMENT pay ON pay.Transaction_ID = rt.Transaction_ID
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY rt.Transaction_Date DESC`,
+      FROM RENTAL_TRANSACTION rt
+      JOIN VEHICLE v ON rt.Vehicle_ID = v.Vehicle_ID
+      JOIN PERSON c  ON rt.Customer_Account_ID = c.Account_ID
+      JOIN PERSON o  ON rt.Owner_Account_ID    = o.Account_ID
+      LEFT JOIN PAYMENT pay ON pay.Transaction_ID = rt.Transaction_ID
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY rt.Transaction_Date DESC`,
       params
     );
     res.json({ success: true, data: rows });
@@ -78,11 +80,27 @@ router.get('/:id', auth, async (req, res) => {
 
 // Booking
 router.post('/', auth, async (req, res) => {
-  const { vehicle_id, start_date_and_time, end_date_and_time, pickup_location, drop_off_location, with_driver } = req.body;
+  const {
+  vehicle_id,
+  start_date_and_time,
+  end_date_and_time,
+  start_date,
+  end_date,
+  pickup_location,
+  drop_off_location,
+  with_driver,
+  other_details,
+  driver_name,
+  drivers_license,
+} = req.body;
 
-  if (!vehicle_id || !start_date_and_time || !end_date_and_time || !pickup_location || !drop_off_location) {
-    return res.status(400).json({ success: false, message: 'Please fill in all booking fields.' });
-  }
+// Accept either naming convention from frontend
+const startDT = start_date_and_time || start_date;
+const endDT   = end_date_and_time   || end_date;
+
+if (!vehicle_id || !startDT || !endDT || !pickup_location) {
+  return res.status(400).json({ success: false, message: 'Please fill in all booking fields.' });
+}
 
   try {
     const [[vehicle]] = await pool.query(`SELECT * FROM VEHICLE WHERE Vehicle_ID = ?`, [vehicle_id]);
@@ -99,7 +117,7 @@ router.post('/', auth, async (req, res) => {
     }
 
     const rentalDuration = Math.max(1, Math.ceil(
-      (new Date(end_date_and_time) - new Date(start_date_and_time)) / 86400000
+      (new Date(endDT) - new Date(startDT)) / 86400000
     ));
 
     const txID  = await genID('TRANSACTION');
@@ -111,9 +129,9 @@ router.post('/', auth, async (req, res) => {
          Pickup_Location, Drop_off_Location, Rental_Duration, With_Driver, Rental_Status,
          Customer_Account_ID, Owner_Account_ID)
        VALUES (?,?,?,?,?,?,?,?,?,'Pending',?,?)`,
-      [txID, vehicle_id, today, start_date_and_time, end_date_and_time,
-       pickup_location, drop_off_location, rentalDuration, with_driver ? 1 : 0,
-       req.user.account_id, vehicle.Owner_Account_ID]
+      [txID, vehicle_id, today, startDT, endDT,
+      pickup_location, drop_off_location || pickup_location, rentalDuration, with_driver ? 1 : 0,
+      req.user.account_id, vehicle.Owner_Account_ID]
     );
 
     res.status(201).json({

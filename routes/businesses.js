@@ -62,7 +62,28 @@ router.get('/', async (req, res) => {
         .sort((a, b) => (a.Distance_KM ?? 9999) - (b.Distance_KM ?? 9999));
     }
 
-    res.json({ success: true, data: rows });
+    // Attach vehicles to each business row
+  const bizIds = rows.map(b => b.Business_ID);
+  let vehicles = [];
+  if (bizIds.length > 0) {
+    const placeholders = bizIds.map(() => '?').join(',');
+    const [vRows] = await pool.query(
+      `SELECT v.*, p.Address AS Owner_Address
+      FROM VEHICLE v
+      JOIN PERSON p ON v.Owner_Account_ID = p.Account_ID
+      WHERE v.Business_ID IN (${placeholders})
+        AND v.Vehicle_Status = 'Available'`,
+      bizIds
+    );
+    vehicles = vRows;
+  }
+
+  const data = rows.map(biz => ({
+    ...biz,
+    vehicles: vehicles.filter(v => v.Business_ID === biz.Business_ID),
+  }));
+
+  res.json({ success: true, data });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error.' });
@@ -239,6 +260,31 @@ router.patch('/:id/deactivate', auth, async (req, res) => {
       [req.params.id]
     );
     res.json({ success: true, message: 'Business deactivated.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// GET /api/businesses/:id/vehicles
+router.get('/:id/vehicles', async (req, res) => {
+  try {
+    const [vehicles] = await pool.query(
+      `SELECT v.*,
+              AVG(f.Score)             AS Avg_Rating,
+              COUNT(f.Feedback_ID)     AS Review_Count
+       FROM VEHICLE v
+       LEFT JOIN FEEDBACK f ON f.Vehicle_ID = v.Vehicle_ID
+       WHERE v.Owner_Account_ID = (
+         SELECT Owner_Account_ID FROM BUSINESS
+         -- fallback: match by Business_ID column if it exists, else match by Account_ID
+         WHERE Business_ID = ? OR Owner_Account_ID = ?
+         LIMIT 1
+       )
+       GROUP BY v.Vehicle_ID`,
+      [req.params.id, req.params.id]
+    );
+    res.json({ success: true, data: vehicles });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error.' });

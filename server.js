@@ -12,6 +12,8 @@ app.use('/api/vehicles',     require('./routes/vehicles'));
 app.use('/api/transactions', require('./routes/transactions'));
 app.use('/api/payments',     require('./routes/payments'));
 app.use('/api/feedback',     require('./routes/feedback'));
+app.use('/api/businesses',   require('./routes/businesses'));
+app.use('/api/inquiries',    require('./routes/inquiries'));
 
 app.get('/', (req, res) => {
   res.json({ message: 'V-Connect API is running!', version: '1.0.0' });
