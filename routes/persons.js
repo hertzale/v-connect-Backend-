@@ -63,12 +63,12 @@ router.get('/me', auth, async (req, res) => {
 
 // Profile Update 
 router.put('/me', auth, async (req, res) => {
-  const { name, address, contact_number, drivers_license } = req.body;
-  try {
-    await pool.query(
-      `UPDATE PERSON SET Name=?, Address=?, Contact_Number=?, Drivers_License=? WHERE Account_ID=?`,
-      [name, address, contact_number, drivers_license || null, req.user.account_id]
-    );
+    const { name, address, contact_number, drivers_license, email } = req.body;
+    try {
+      await pool.query(
+        `UPDATE PERSON SET Name=?, Address=?, Contact_Number=?, Drivers_License=?, Email=? WHERE Account_ID=?`,
+        [name, address, contact_number, drivers_license || null, email || null, req.user.account_id]
+      );
     res.json({ success: true, message: 'Profile updated.' });
   } catch (err) {
     console.error(err);
